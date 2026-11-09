@@ -96,11 +96,21 @@ export async function updateKitchenOrderStatus(
   try {
     const restaurantId = await getTargetRestaurantId(req);
     const id = req.params.id as string;
-    const { status } = req.body as { status?: string };
+    const { status, addOnStatus } = req.body as { status?: string; addOnStatus?: string };
 
     const allowedStatuses = ['PREPARING', 'BAKING', 'READY', 'DELIVERED', 'CANCELLED'];
-    if (!status || !allowedStatuses.includes(status)) {
+    const allowedAddOnStatuses = ['PREPARING', 'BAKING', 'READY', 'DELIVERED', 'CANCELLED'];
+
+    if (!status && !addOnStatus) {
+      throw new AppError('Either status or addOnStatus is required.', 400, 'STATUS_REQUIRED');
+    }
+
+    if (status && !allowedStatuses.includes(status)) {
       throw new AppError(`Invalid status. Allowed values: ${allowedStatuses.join(', ')}`, 400, 'INVALID_STATUS');
+    }
+
+    if (addOnStatus && !allowedAddOnStatuses.includes(addOnStatus)) {
+      throw new AppError(`Invalid addOnStatus. Allowed values: ${allowedAddOnStatuses.join(', ')}`, 400, 'INVALID_ADDON_STATUS');
     }
 
     const order = await prisma.order.findFirst({
@@ -120,11 +130,29 @@ export async function updateKitchenOrderStatus(
       CANCELLED: 'cancelledAt',
     };
 
-    const updateData: Record<string, any> = {
-      status,
-    };
-    if (statusDateFields[status]) {
-      updateData[statusDateFields[status]] = new Date();
+    const updateData: Record<string, any> = {};
+
+    if (status) {
+      updateData.status = status;
+      if (statusDateFields[status]) {
+        updateData[statusDateFields[status]] = new Date();
+      }
+    }
+
+    // Handle addOnStatus updates
+    if (addOnStatus !== undefined) {
+      updateData.addOnStatus = addOnStatus;
+    } else if (order.addOnStatus && status) {
+      // Automatically keep addOnStatus in lockstep with the kitchen progress
+      if (status === 'READY') {
+        updateData.addOnStatus = 'READY';
+      } else if (status === 'DELIVERED') {
+        updateData.addOnStatus = 'DELIVERED';
+      } else if (status === 'CANCELLED') {
+        updateData.addOnStatus = 'CANCELLED';
+      } else if (status === 'PREPARING' || status === 'BAKING') {
+        updateData.addOnStatus = 'PREPARING';
+      }
     }
 
     const updated = await prisma.order.update({
@@ -140,6 +168,8 @@ export async function updateKitchenOrderStatus(
       emitOrderStatusUpdate(updated.id, updated.restaurantId, {
         orderId: updated.id,
         status: updated.status,
+        addOnStatus: updated.addOnStatus,
+        lastAddOnAt: updated.lastAddOnAt,
         updatedAt: updated.updatedAt.toISOString(),
       });
     } catch (err) {
@@ -149,7 +179,7 @@ export async function updateKitchenOrderStatus(
     res.json({
       success: true,
       data: { order: updated },
-      message: `Order status updated to ${status}`,
+      message: `Order status updated to ${status || addOnStatus}`,
     });
   } catch (error) {
     next(error);

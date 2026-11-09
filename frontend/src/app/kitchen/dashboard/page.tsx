@@ -221,10 +221,17 @@ export default function KitchenDashboardPage() {
   }, [targetRestId, queryClient]);
 
   // Status update handler
-  const handleUpdateStatus = async (orderId: string, nextStatus: string) => {
+  const handleUpdateStatus = async (orderId: string, nextStatus?: string, nextAddOnStatus?: string) => {
     try {
-      await api.patch(`/kitchen/orders/${orderId}/status`, { status: nextStatus });
-      toast.success(`Order status updated to ${nextStatus}`);
+      const payload: { status?: string; addOnStatus?: string } = {};
+      if (nextStatus) payload.status = nextStatus;
+      if (nextAddOnStatus) payload.addOnStatus = nextAddOnStatus;
+      await api.patch(`/kitchen/orders/${orderId}/status`, payload);
+      toast.success(
+        nextAddOnStatus
+          ? `Add-ons updated to ${nextAddOnStatus}`
+          : `Order status updated to ${nextStatus}`
+      );
       queryClient.invalidateQueries({ queryKey: ['kitchen-orders'] });
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Failed to update order status');
@@ -619,7 +626,37 @@ export default function KitchenDashboardPage() {
                     </div>
 
                     {/* Action Button Footer */}
-                    <div className="p-2.5 sm:p-4 bg-slate-950 border-t border-slate-800 mt-auto">
+                    <div className="p-2.5 sm:p-4 bg-slate-950 border-t border-slate-800 mt-auto space-y-2">
+                      {/* Add-on Items Action Controls */}
+                      {order.addOnStatus && order.addOnStatus !== 'DELIVERED' && order.addOnStatus !== 'CANCELLED' && (
+                        <div className="p-2 bg-rose-950/40 border border-rose-500/40 rounded-xl space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-rose-300">
+                            <span className="flex items-center gap-1">
+                              <Flame className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                              <span>Add-ons: {order.addOnStatus}</span>
+                            </span>
+                            <span className="text-[10px] text-rose-400/80 font-normal">Active Journey</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {order.addOnStatus !== 'READY' && (
+                              <button
+                                onClick={() => handleUpdateStatus(order.id, undefined, 'READY')}
+                                className="flex-1 py-1.5 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] rounded-lg transition-all flex items-center justify-center gap-1 shadow-sm active:scale-98"
+                              >
+                                🍽️ Mark Add-ons Ready
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleUpdateStatus(order.id, undefined, 'DELIVERED')}
+                              className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] rounded-lg transition-all flex items-center justify-center gap-1 shadow-sm active:scale-98"
+                            >
+                              ✅ Mark Add-ons Served
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Main Order Buttons */}
                       {order.status === 'CONFIRMED' && (
                         <button
                           onClick={() => handleUpdateStatus(order.id, 'PREPARING')}

@@ -1069,6 +1069,16 @@ export async function updateOrderStatus(req: AuthenticatedRequest, res: Response
 
     if (addOnStatus !== undefined) {
       updateData.addOnStatus = addOnStatus;
+    } else if (order.addOnStatus && status) {
+      if (status === 'READY') {
+        updateData.addOnStatus = 'READY';
+      } else if (status === 'DELIVERED') {
+        updateData.addOnStatus = 'DELIVERED';
+      } else if (status === 'CANCELLED') {
+        updateData.addOnStatus = 'CANCELLED';
+      } else if (status === 'PREPARING' || status === 'BAKING') {
+        updateData.addOnStatus = 'PREPARING';
+      }
     }
 
     const updatedOrder = await prisma.order.update({

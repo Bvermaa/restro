@@ -132,6 +132,7 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
   const { user, accessToken } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [currentStatus, setCurrentStatus] = useState<string>('PENDING');
+  const [currentAddOnStatus, setCurrentAddOnStatus] = useState<string | null>(null);
   const [showRating, setShowRating] = useState(false);
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
@@ -224,13 +225,28 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
       return response.data.data.order as Order;
     },
     enabled: mounted && !!orderId,
+    refetchInterval: (query) => {
+      const orderData = query.state.data as Order | undefined;
+      // Auto-poll active orders or active add-on journeys every 4 seconds
+      if (
+        !orderData ||
+        (orderData.status !== 'DELIVERED' && orderData.status !== 'CANCELLED') ||
+        (orderData.addOnStatus && orderData.addOnStatus !== 'DELIVERED' && orderData.addOnStatus !== 'CANCELLED')
+      ) {
+        return 4000;
+      }
+      return false;
+    },
   });
 
   useEffect(() => {
     if (order?.status) {
       setCurrentStatus(order.status);
     }
-  }, [order?.status]);
+    if (order?.addOnStatus !== undefined) {
+      setCurrentAddOnStatus(order.addOnStatus);
+    }
+  }, [order?.status, order?.addOnStatus]);
 
   // ── Socket.io real-time tracking ──────────────────────────────────────────
   useEffect(() => {
@@ -276,6 +292,10 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
             toast.success('✅ Payment Confirmed by Restaurant!', { id: 'payment-confirmed-toast' });
           } else if (data.paymentStatus === 'FAILED') {
             toast.error('⚠️ Payment Not Confirmed by Restaurant.', { id: 'payment-failed-toast' });
+          }
+
+          if (data.addOnStatus !== undefined) {
+            setCurrentAddOnStatus(data.addOnStatus);
           }
 
           if (data.addOnStatus) {
@@ -494,48 +514,65 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
 
       <div className="max-w-lg mx-auto px-4 space-y-5">
         {/* Add-on Order Journey Banner */}
-        {order.addOnStatus && (
-          <div className={`border-2 rounded-2xl p-5 shadow-lg space-y-3 ${
-            order.addOnStatus === 'CANCELLED'
-              ? 'bg-red-500/10 border-red-500/30'
-              : 'bg-gradient-to-r from-blue-500/10 via-amber-500/10 to-emerald-500/10 border-blue-500/30'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-display font-bold text-sm text-foreground">
-                <Sparkles className={`w-5 h-5 ${order.addOnStatus === 'CANCELLED' ? 'text-red-500' : 'text-blue-500 animate-pulse'}`} />
-                <span>⚡ Add-on Items Journey</span>
+        {(() => {
+          const activeAddOnStatus = currentAddOnStatus !== null ? currentAddOnStatus : order.addOnStatus;
+          if (!activeAddOnStatus) return null;
+
+          return (
+            <div className={`border-2 rounded-2xl p-5 shadow-lg space-y-3 ${
+              activeAddOnStatus === 'CANCELLED'
+                ? 'bg-red-500/10 border-red-500/30'
+                : 'bg-gradient-to-r from-blue-500/10 via-amber-500/10 to-emerald-500/10 border-blue-500/30'
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-display font-bold text-sm text-foreground">
+                  <Sparkles className={`w-5 h-5 ${activeAddOnStatus === 'CANCELLED' ? 'text-red-500' : 'text-blue-500 animate-pulse'}`} />
+                  <span>⚡ Add-on Items Journey</span>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-xs font-extrabold text-white shadow-sm ${
+                  activeAddOnStatus === 'CANCELLED'
+                    ? 'bg-red-500'
+                    : activeAddOnStatus === 'PREPARING'
+                    ? 'bg-blue-500'
+                    : activeAddOnStatus === 'READY'
+                    ? 'bg-amber-500'
+                    : 'bg-emerald-500'
+                }`}>
+                  {activeAddOnStatus === 'CANCELLED'
+                    ? '🚫 Add-ons Cancelled'
+                    : activeAddOnStatus === 'PREPARING'
+                    ? '👨‍🍳 Preparing Add-ons'
+                    : activeAddOnStatus === 'READY'
+                    ? '🍽️ Ready to Serve'
+                    : '✅ Add-ons Served'}
+                </span>
               </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-extrabold text-white shadow-sm ${
-                order.addOnStatus === 'CANCELLED' ? 'bg-red-500' : 'bg-blue-500'
-              }`}>
-                {order.addOnStatus === 'CANCELLED' ? '🚫 Add-ons Cancelled' : order.addOnStatus === 'PREPARING' ? '👨‍🍳 Preparing Add-ons' : order.addOnStatus === 'READY' ? '🍽️ Ready to Serve' : '✅ Add-ons Served'}
-              </span>
+              <p className="text-xs text-muted-foreground">
+                {activeAddOnStatus === 'CANCELLED'
+                  ? 'Your add-on items have been cancelled by the restaurant.'
+                  : activeAddOnStatus === 'PREPARING' 
+                  ? 'The kitchen has received your add-on items and is preparing them right now!' 
+                  : activeAddOnStatus === 'READY' 
+                  ? 'Your add-on items are ready and will be served to your table shortly!' 
+                  : 'Your add-on items have been served. Enjoy your meal!'}
+              </p>
+              {/* Add-on Progress Steps */}
+              {activeAddOnStatus !== 'CANCELLED' && (
+                <div className="grid grid-cols-3 gap-2 pt-2 text-center text-[11px] font-bold">
+                  <div className={`p-2 rounded-xl border transition-all ${activeAddOnStatus === 'PREPARING' ? 'bg-blue-500 text-white border-blue-600 shadow-md scale-105' : 'bg-muted/50 text-muted-foreground border-border'}`}>
+                    1. Preparing
+                  </div>
+                  <div className={`p-2 rounded-xl border transition-all ${activeAddOnStatus === 'READY' ? 'bg-amber-500 text-white border-amber-600 shadow-md scale-105' : 'bg-muted/50 text-muted-foreground border-border'}`}>
+                    2. Ready to Serve
+                  </div>
+                  <div className={`p-2 rounded-xl border transition-all ${activeAddOnStatus === 'DELIVERED' ? 'bg-emerald-500 text-white border-emerald-600 shadow-md scale-105' : 'bg-muted/50 text-muted-foreground border-border'}`}>
+                    3. Served
+                  </div>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {order.addOnStatus === 'CANCELLED'
-                ? 'Your add-on items have been cancelled by the restaurant.'
-                : order.addOnStatus === 'PREPARING' 
-                ? 'The kitchen has received your add-on items and is preparing them right now!' 
-                : order.addOnStatus === 'READY' 
-                ? 'Your add-on items are ready and will be served to your table shortly!' 
-                : 'Your add-on items have been served. Enjoy your meal!'}
-            </p>
-            {/* Add-on Progress Steps */}
-            {order.addOnStatus !== 'CANCELLED' && (
-              <div className="grid grid-cols-3 gap-2 pt-2 text-center text-[11px] font-bold">
-                <div className={`p-2 rounded-xl border transition-all ${order.addOnStatus === 'PREPARING' ? 'bg-blue-500 text-white border-blue-600 shadow-md scale-105' : 'bg-muted/50 text-muted-foreground border-border'}`}>
-                  1. Preparing
-                </div>
-                <div className={`p-2 rounded-xl border transition-all ${order.addOnStatus === 'READY' ? 'bg-amber-500 text-white border-amber-600 shadow-md scale-105' : 'bg-muted/50 text-muted-foreground border-border'}`}>
-                  2. Ready to Serve
-                </div>
-                <div className={`p-2 rounded-xl border transition-all ${order.addOnStatus === 'DELIVERED' ? 'bg-emerald-500 text-white border-emerald-600 shadow-md scale-105' : 'bg-muted/50 text-muted-foreground border-border'}`}>
-                  3. Served
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* Status tracker */}
         <div className="bg-card border border-border rounded-2xl p-5">
