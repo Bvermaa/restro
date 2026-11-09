@@ -35,7 +35,7 @@
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "prisma": "^5.22.0",
-    "rate-limit-redis": "^5.0.0",
+    "rate-limit-redis": "^6.0.2",
     "razorpay": "^2.9.4",
     "socket.io": "^4.8.1",
     "swagger-jsdoc": "^6.2.8",
