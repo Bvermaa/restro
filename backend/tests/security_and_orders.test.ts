@@ -69,6 +69,7 @@ jest.mock('../src/lib/prisma', () => {
       id: 'customer-a-uuid',
       name: 'Customer Alice',
       email: 'alice@test.com',
+      phone: '9876543210',
       role: 'CUSTOMER',
       verifyToken: null,
       walletBalance: 200,
@@ -78,6 +79,7 @@ jest.mock('../src/lib/prisma', () => {
       id: 'customer-b-uuid',
       name: 'Customer Bob',
       email: 'bob@test.com',
+      phone: '1111111111',
       role: 'CUSTOMER',
       verifyToken: null,
       walletBalance: 0,
@@ -118,6 +120,7 @@ jest.mock('../src/lib/prisma', () => {
     packagingFee: 0,
     deletedAt: null,
     items: [],
+    restaurant: mockRestaurantA,
   };
 
   const mockDeliveredOrder = {
@@ -129,6 +132,23 @@ jest.mock('../src/lib/prisma', () => {
     paymentMethod: 'COD',
     total: 150,
     deletedAt: null,
+    restaurant: mockRestaurantA,
+  };
+
+  const mockGuestOrder = {
+    id: 'cjld2cjxh0000qzrmn831i7r6',
+    restaurantId: 'rest-a-uuid',
+    userId: null,
+    guestName: 'Guest John',
+    guestPhone: '9876543210',
+    tableNumber: '5',
+    status: 'PREPARING',
+    paymentStatus: 'PENDING',
+    paymentMethod: 'COD',
+    total: 150,
+    deletedAt: null,
+    items: [],
+    restaurant: mockRestaurantA,
   };
 
   return {
@@ -179,17 +199,34 @@ jest.mock('../src/lib/prisma', () => {
             return mockOrderA;
           }
           if (where?.id === 'cjld2cjxh0000qzrmn831i7r5') return mockDeliveredOrder;
+          if (where?.id === 'cjld2cjxh0000qzrmn831i7r6') {
+            if (where?.restaurantId && where.restaurantId !== 'rest-a-uuid') return null;
+            return mockGuestOrder;
+          }
           return null;
         }),
         findUnique: jest.fn(async ({ where }) => {
           if (where?.id === 'cjld2cjxh0000qzrmn831i7r4') return mockOrderA;
           if (where?.id === 'cjld2cjxh0000qzrmn831i7r5') return mockDeliveredOrder;
+          if (where?.id === 'cjld2cjxh0000qzrmn831i7r6') return mockGuestOrder;
           return null;
         }),
         update: jest.fn(async ({ where, data }) => {
-          const target = where?.id === 'cjld2cjxh0000qzrmn831i7r4' ? mockOrderA : mockDeliveredOrder;
+          const target = where?.id === 'cjld2cjxh0000qzrmn831i7r4' ? mockOrderA : (where?.id === 'cjld2cjxh0000qzrmn831i7r6' ? mockGuestOrder : mockDeliveredOrder);
           Object.assign(target, data);
           return { ...target, updatedAt: new Date(), restaurant: mockRestaurantA };
+        }),
+        updateMany: jest.fn(async ({ where, data }) => {
+          // Check matching phone filter for guest claiming
+          if (where?.OR && Array.isArray(where.OR)) {
+            const hasMatchingPhone = where.OR.some((f: any) => f.guestPhone === '9876543210');
+            if (hasMatchingPhone && where.id?.in?.includes('cjld2cjxh0000qzrmn831i7r6')) {
+              mockGuestOrder.userId = data.userId;
+              return { count: 1 };
+            }
+            return { count: 0 };
+          }
+          return { count: 0 };
         }),
         create: jest.fn(async ({ data }) => ({
           id: 'new-order-uuid',
@@ -212,7 +249,13 @@ jest.mock('../src/lib/prisma', () => {
       },
       cartItem: {
         findFirst: jest.fn(async () => null),
+        findUnique: jest.fn(async () => null),
         findMany: jest.fn(async () => []),
+        upsert: jest.fn(async ({ create, update }) => ({
+          id: 'cart-item-1',
+          ...create,
+          ...update,
+        })),
         deleteMany: jest.fn(async () => ({ count: 0 })),
         delete: jest.fn(async () => ({})),
       },
@@ -221,6 +264,8 @@ jest.mock('../src/lib/prisma', () => {
       },
       payment: {
         findFirst: jest.fn(async () => null),
+        findUnique: jest.fn(async () => null),
+        update: jest.fn(async () => ({})),
         create: jest.fn(async ({ data }) => ({ id: 'pay-123', ...data })),
       },
       notification: {
@@ -305,6 +350,42 @@ describe('Security, Orders, Cart & Kitchen Audits', () => {
       // Item price = 150 + DB addon price 30 = 180 subtotal. 180 + 18% GST (32.4) = 212.4
       expect(res.body.data.order.total).toBe(212.4);
     });
+
+    it('rejects invalid variant in order with 400 Bad Request', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders/guest')
+        .send({
+          restaurantSlug: 'restaurant-a',
+          cartItems: [
+            {
+              menuItemId: ITEM_A_ID,
+              variantId: 'cjld2cjxh0000qzrmn831i7r8',
+              quantity: 1,
+            },
+          ],
+          paymentMethod: 'COD',
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/variant.*does not exist/i);
+    });
+
+    it('rejects invalid add-on in order with 400 Bad Request', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders/guest')
+        .send({
+          restaurantSlug: 'restaurant-a',
+          cartItems: [
+            {
+              menuItemId: ITEM_A_ID,
+              quantity: 1,
+              addOns: [{ id: 'cjld2cjxh0000qzrmn831i7r9', name: 'Fake Truffle Oil', price: 50 }],
+            },
+          ],
+          paymentMethod: 'COD',
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/add-on.*does not belong/i);
+    });
   });
 
   describe('2. IDOR & Tenant Isolation', () => {
@@ -330,17 +411,79 @@ describe('Security, Orders, Cart & Kitchen Audits', () => {
       expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/access denied.*do not own/i);
     });
+
+    it('does not expose sensitive restaurant bank account details in order details', async () => {
+      const res = await request(app)
+        .get(`/api/v1/orders/${ORDER_A_ID}`)
+        .set('Authorization', `Bearer ${customerAToken}`);
+      expect(res.status).toBe(200);
+      const restaurantData = res.body.data.order.restaurant;
+      expect(restaurantData.bankAccountNumber).toBeUndefined();
+      expect(restaurantData.bankIfsc).toBeUndefined();
+      expect(restaurantData.bankName).toBeUndefined();
+    });
+
+    it('sanitizes customer address and masks phone number for untracked guest sessions', async () => {
+      const res = await request(app)
+        .get(`/api/v1/orders/cjld2cjxh0000qzrmn831i7r6`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.order.guestPhone).toBe('987****210');
+      expect(res.body.data.order.address).toBeNull();
+    });
   });
 
   describe('3. Order Lifecycle & Add-ons Integrity', () => {
     it('prevents adding items to a DELIVERED order', async () => {
       const res = await request(app)
         .post(`/api/v1/orders/${ORDER_DELIVERED_ID}/add-items`)
+        .set('Authorization', `Bearer ${customerAToken}`)
         .send({
           cartItems: [{ menuItemId: ITEM_A_ID, quantity: 1 }],
         });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/cannot add items to an order that is delivered/i);
+    });
+
+    it('prevents unrelated Customer B from adding items to Customer A order', async () => {
+      const res = await request(app)
+        .post(`/api/v1/orders/${ORDER_A_ID}/add-items`)
+        .set('Authorization', `Bearer ${customerBToken}`)
+        .send({
+          cartItems: [{ menuItemId: ITEM_A_ID, quantity: 1 }],
+        });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/permission to modify this order/i);
+    });
+
+    it('prevents unauthenticated user from adding items to a customer order', async () => {
+      const res = await request(app)
+        .post(`/api/v1/orders/${ORDER_A_ID}/add-items`)
+        .send({
+          cartItems: [{ menuItemId: ITEM_A_ID, quantity: 1 }],
+        });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/authentication required/i);
+    });
+
+    it('prevents guest from adding items without a valid table session signature', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders/cjld2cjxh0000qzrmn831i7r6/add-items')
+        .send({
+          cartItems: [{ menuItemId: ITEM_A_ID, quantity: 1 }],
+        });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/table session token is required/i);
+    });
+
+    it('allows authorized customer to add items to their own order', async () => {
+      const res = await request(app)
+        .post(`/api/v1/orders/${ORDER_A_ID}/add-items`)
+        .set('Authorization', `Bearer ${customerAToken}`)
+        .send({
+          cartItems: [{ menuItemId: ITEM_A_ID, quantity: 1 }],
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
     });
   });
 
@@ -365,7 +508,7 @@ describe('Security, Orders, Cart & Kitchen Audits', () => {
     });
   });
 
-  describe('5. Payment Webhook Security', () => {
+  describe('5. Payment Webhook Security & Tampering Protection', () => {
     it('rejects unauthorized payment verification without webhook secret', async () => {
       const res = await request(app)
         .post('/api/v1/payments/verify-upi')
@@ -373,9 +516,82 @@ describe('Security, Orders, Cart & Kitchen Audits', () => {
           orderId: ORDER_A_ID,
           receivedAmount: 200,
         });
-      // Should reject with 401 Unauthorized
       expect(res.status).toBe(401);
       expect(res.body.error).toMatch(/unauthorized.*webhook.*secret/i);
+    });
+
+    it('rejects default fallback secret bypass ("rzp_webhook_secret_default") when configured secret differs', async () => {
+      const res = await request(app)
+        .post('/api/v1/payments/verify-upi')
+        .set('x-webhook-secret', 'rzp_webhook_secret_default')
+        .send({
+          orderId: ORDER_A_ID,
+          receivedAmount: 200,
+        });
+      expect(res.status).toBe(401);
+      expect(res.body.error).toMatch(/unauthorized/i);
+    });
+  });
+
+  describe('6. Guest Order Claiming Verification', () => {
+    it('rejects claiming guest orders when phone number does not match', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders/claim-guest-orders')
+        .set('Authorization', `Bearer ${customerBToken}`) // Bob's phone: 1111111111, guest phone: 9876543210
+        .send({
+          orderIds: ['cjld2cjxh0000qzrmn831i7r6'],
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.data.claimedCount).toBe(0);
+    });
+
+    it('successfully claims guest orders matching verified customer phone', async () => {
+      const res = await request(app)
+        .post('/api/v1/orders/claim-guest-orders')
+        .set('Authorization', `Bearer ${customerAToken}`) // Alice's phone: 9876543210
+        .send({
+          orderIds: ['cjld2cjxh0000qzrmn831i7r6'],
+        });
+      expect(res.status).toBe(200);
+      expect(res.body.data.claimedCount).toBe(1);
+    });
+  });
+
+  describe('7. Cart Tampering & Quantity Limit Enforcement', () => {
+    it('enforces canonical database add-on prices and rejects invalid add-on in cart', async () => {
+      const res = await request(app)
+        .post('/api/v1/cart')
+        .set('Authorization', `Bearer ${customerAToken}`)
+        .send({
+          menuItemId: ITEM_A_ID,
+          quantity: 2,
+          addOns: [{ id: 'cjld2cjxh0000qzrmn831i7r9', name: 'Tampered Caviar', price: 0 }],
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/add-on.*invalid|invalid.*add-on/i);
+    });
+
+    it('prevents exceeding total quantity of 100 on repeated cart additions', async () => {
+      // Simulate cart already having 95 items
+      (prisma.cartItem.findUnique as jest.Mock).mockResolvedValueOnce({
+        id: 'cart-item-1',
+        userId: 'customer-a-uuid',
+        menuItemId: ITEM_A_ID,
+        variantId: null,
+        quantity: 95,
+        addOns: [],
+      });
+
+      // Now attempt to add 10 more (total would be 105, exceeding 100)
+      const res = await request(app)
+        .post('/api/v1/cart')
+        .set('Authorization', `Bearer ${customerAToken}`)
+        .send({
+          menuItemId: ITEM_A_ID,
+          quantity: 10,
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/cannot exceed 100/i);
     });
   });
 });

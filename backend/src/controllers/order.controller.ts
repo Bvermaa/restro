@@ -71,7 +71,10 @@ async function calculateOrderTotal(
       let unitPrice = menuItem.price;
       if (cartItem.variantId) {
         const variant = menuItem.variants.find((v) => v.id === cartItem.variantId);
-        if (variant) unitPrice = variant.price;
+        if (!variant) {
+          throw new AppError(`Variant ${cartItem.variantId} does not exist for menu item '${menuItem.name}'.`, 400, 'INVALID_VARIANT');
+        }
+        unitPrice = variant.price;
       }
 
       // Verify and resolve add-on prices strictly from database
@@ -80,14 +83,15 @@ async function calculateOrderTotal(
       if (cartItem.addOns && Array.isArray(cartItem.addOns)) {
         for (const reqAddOn of cartItem.addOns) {
           const dbAddOn = menuItem.addOns.find((ao) => ao.id === reqAddOn.id || ao.name.toLowerCase() === (reqAddOn.name || '').toLowerCase());
-          if (dbAddOn) {
-            validatedAddOns.push({
-              id: dbAddOn.id,
-              name: dbAddOn.name,
-              price: dbAddOn.price,
-            });
-            addOnsTotal += dbAddOn.price;
+          if (!dbAddOn) {
+            throw new AppError(`Add-on '${reqAddOn.name || reqAddOn.id}' does not belong to menu item '${menuItem.name}'.`, 400, 'INVALID_ADDON');
           }
+          validatedAddOns.push({
+            id: dbAddOn.id,
+            name: dbAddOn.name,
+            price: dbAddOn.price,
+          });
+          addOnsTotal += dbAddOn.price;
         }
       }
 
@@ -669,10 +673,6 @@ export async function getOrderById(
             paymentQrCode: true,
             paymentUpiId: true,
             paymentPhone: true,
-            bankName: true,
-            bankAccountNumber: true,
-            bankIfsc: true,
-            bankAccountHolder: true,
           }
         },
         items: {
@@ -716,14 +716,36 @@ export async function getOrderById(
         }
       }
     } else {
-      // Guest order: if logged in as a restaurant owner, ensure it is their restaurant
-      if (req.user && req.user.role === 'RESTAURANT_OWNER') {
-        const ownsRestaurant = await prisma.restaurant.findFirst({
-          where: { id: order.restaurantId, ownerId: req.user.id, deletedAt: null },
-          select: { id: true },
-        });
-        if (!ownsRestaurant) {
-          throw new AppError('Access denied. You do not own this restaurant.', 403, 'ACCESS_DENIED');
+      // Guest order:
+      // If logged in as staff/owner, check restaurant ownership
+      if (req.user) {
+        if (req.user.role === 'RESTAURANT_OWNER') {
+          const ownsRestaurant = await prisma.restaurant.findFirst({
+            where: { id: order.restaurantId, ownerId: req.user.id, deletedAt: null },
+            select: { id: true },
+          });
+          if (!ownsRestaurant) {
+            throw new AppError('Access denied. You do not own this restaurant.', 403, 'ACCESS_DENIED');
+          }
+        } else if (req.user.role === 'KITCHEN') {
+          if (req.user.kitchenRestaurantId !== order.restaurantId) {
+            throw new AppError('Access denied. You are not staff of this restaurant.', 403, 'ACCESS_DENIED');
+          }
+        }
+      } else {
+        // Unauthenticated guest tracking
+        const tableToken = (req.headers['x-table-token'] || req.query.tableToken) as string;
+        const hasValidTableSession = tableToken && order.tableNumber && verifyTableSignature(order.restaurantId, order.tableNumber, tableToken);
+        if (!hasValidTableSession) {
+          // If table session signature is not supplied, sanitize sensitive customer PII from response
+          const sanitizedOrder = {
+            ...order,
+            guestPhone: order.guestPhone ? `${order.guestPhone.slice(0, 3)}****${order.guestPhone.slice(-3)}` : null,
+            address: null,
+            user: null,
+          };
+          res.json({ success: true, data: { order: sanitizedOrder } });
+          return;
         }
       }
     }
@@ -935,6 +957,57 @@ export async function addItemsToOrder(
       throw new AppError(`Cannot add items to an order that is ${order.status.toLowerCase()}.`, 400, 'ORDER_CLOSED');
     }
 
+    // Access control & order ownership authorization
+    const user = (req as any).user;
+    if (order.userId) {
+      if (!user) {
+        throw new AppError('Authentication required to modify this order.', 401, 'UNAUTHORIZED');
+      }
+      if (user.role === 'CUSTOMER' && user.id !== order.userId) {
+        throw new AppError('You do not have permission to modify this order.', 403, 'FORBIDDEN');
+      }
+      if (user.role === 'RESTAURANT_OWNER') {
+        const ownsRestaurant = await prisma.restaurant.findFirst({
+          where: { id: order.restaurantId, ownerId: user.id, deletedAt: null },
+          select: { id: true },
+        });
+        if (!ownsRestaurant) {
+          throw new AppError('You do not have permission to modify orders for this restaurant.', 403, 'FORBIDDEN');
+        }
+      } else if (user.role === 'KITCHEN') {
+        if (user.kitchenRestaurantId !== order.restaurantId) {
+          throw new AppError('You do not have permission to modify orders for this restaurant.', 403, 'FORBIDDEN');
+        }
+      }
+    } else {
+      // Guest order
+      if (user) {
+        if (user.role === 'RESTAURANT_OWNER') {
+          const ownsRestaurant = await prisma.restaurant.findFirst({
+            where: { id: order.restaurantId, ownerId: user.id, deletedAt: null },
+            select: { id: true },
+          });
+          if (!ownsRestaurant) {
+            throw new AppError('You do not have permission to modify orders for this restaurant.', 403, 'FORBIDDEN');
+          }
+        } else if (user.role === 'KITCHEN') {
+          if (user.kitchenRestaurantId !== order.restaurantId) {
+            throw new AppError('You do not have permission to modify orders for this restaurant.', 403, 'FORBIDDEN');
+          }
+        }
+      } else {
+        // Unauthenticated guest user must provide a valid table signature matching the order
+        const tableToken = (req.headers['x-table-token'] || (req.query as any)?.tableToken || (req.body as any)?.tableToken) as string;
+        const hasValidTableSession = tableToken && order.tableNumber && (
+          verifyTableSignature(order.restaurantId, order.tableNumber.trim(), tableToken) ||
+          verifyTableSignature(order.restaurant.slug, order.tableNumber.trim(), tableToken)
+        );
+        if (!hasValidTableSession) {
+          throw new AppError('Valid table session token is required to add items to a guest order.', 403, 'INVALID_TABLE_SESSION');
+        }
+      }
+    }
+
     if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
       throw new AppError('Cart cannot be empty.', 400, 'EMPTY_CART');
     }
@@ -961,14 +1034,17 @@ export async function addItemsToOrder(
       }
 
       const menuItem = menuItems.find((m) => m.id === item.menuItemId);
-      if (!menuItem) continue;
+      if (!menuItem) {
+        throw new AppError(`Menu item ${item.menuItemId} not found, unavailable, or belongs to another restaurant.`, 400, 'ITEM_NOT_FOUND');
+      }
 
       let unitPrice = menuItem.price;
       if (item.variantId) {
         const variant = menuItem.variants.find((v) => v.id === item.variantId);
-        if (variant) {
-          unitPrice = variant.price;
+        if (!variant) {
+          throw new AppError(`Variant ${item.variantId} does not belong to menu item '${menuItem.name}'.`, 400, 'INVALID_VARIANT');
         }
+        unitPrice = variant.price;
       }
 
       // Calculate add-on prices strictly from database
@@ -977,14 +1053,15 @@ export async function addItemsToOrder(
       if (item.addOns && Array.isArray(item.addOns)) {
         for (const reqAddOn of item.addOns) {
           const dbAddOn = menuItem.addOns.find((ao) => ao.id === reqAddOn.id || ao.name.toLowerCase() === (reqAddOn.name || '').toLowerCase());
-          if (dbAddOn) {
-            validatedAddOns.push({
-              id: dbAddOn.id,
-              name: dbAddOn.name,
-              price: dbAddOn.price,
-            });
-            addOnsTotal += dbAddOn.price;
+          if (!dbAddOn) {
+            throw new AppError(`Add-on '${reqAddOn.name || reqAddOn.id}' does not belong to menu item '${menuItem.name}'.`, 400, 'INVALID_ADDON');
           }
+          validatedAddOns.push({
+            id: dbAddOn.id,
+            name: dbAddOn.name,
+            price: dbAddOn.price,
+          });
+          addOnsTotal += dbAddOn.price;
         }
       }
 
@@ -1102,13 +1179,31 @@ export async function claimGuestOrders(
     }
 
     const userId = req.user!.id;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { phone: true, email: true },
+    });
 
-    // Update all guest orders in the list that don't have a userId yet
-    await prisma.order.updateMany({
+    if (!user || (!user.phone && !user.email)) {
+      throw new AppError('A valid phone number or email is required on your profile to claim guest orders.', 400, 'CONTACT_REQUIRED');
+    }
+
+    const contactFilters: any[] = [];
+    if (user.phone) {
+      contactFilters.push({ guestPhone: user.phone });
+    }
+
+    if (contactFilters.length === 0) {
+      throw new AppError('A verified phone number is required to claim matching guest orders.', 400, 'PHONE_REQUIRED');
+    }
+
+    // Update only guest orders that match the user's verified contact
+    const updateResult = await prisma.order.updateMany({
       where: {
         id: { in: orderIds },
         userId: null,
         deletedAt: null,
+        OR: contactFilters,
       },
       data: {
         userId,
@@ -1117,7 +1212,8 @@ export async function claimGuestOrders(
 
     res.json({
       success: true,
-      message: 'Guest orders successfully claimed.',
+      data: { claimedCount: updateResult.count },
+      message: `${updateResult.count} guest order(s) successfully claimed.`,
     });
   } catch (error) {
     next(error);

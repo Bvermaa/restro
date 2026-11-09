@@ -235,14 +235,14 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
       throw new AppError('Invalid email or password.', 401, 'INVALID_CREDENTIALS');
     }
 
+    if ((user as any).isSuspended) {
+      throw new AppError('Your account has been suspended. Please contact platform administration.', 403, 'ACCOUNT_SUSPENDED');
+    }
+
     let restaurantObj = null;
     if (user.role === 'RESTAURANT_OWNER') {
       restaurantObj = await prisma.restaurant.findFirst({
         where: { ownerId: user.id, deletedAt: null },
-      });
-      await prisma.restaurant.updateMany({
-        where: { ownerId: user.id },
-        data: { isSuspended: false, deletedAt: null, isApproved: true },
       });
     }
 

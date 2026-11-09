@@ -202,8 +202,11 @@ export async function verifyAndConfirmPayment(
       secret?: string;
     };
 
-    // Enforce trusted webhook secret authentication
-    const webhookSecret = process.env.PAYMENT_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET || 'rzp_webhook_secret_default';
+    // Enforce trusted webhook secret authentication (NO hard-coded fallback secret permitted)
+    const webhookSecret = process.env.PAYMENT_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      throw new AppError('Server misconfiguration: Payment webhook secret is not configured in the environment.', 500, 'WEBHOOK_CONFIG_ERROR');
+    }
     const providedSecret = secret || (req.headers['x-webhook-secret'] as string) || (req.headers['x-api-key'] as string);
 
     if (!providedSecret || providedSecret !== webhookSecret) {

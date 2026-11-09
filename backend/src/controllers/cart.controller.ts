@@ -28,8 +28,12 @@ export async function getCart(
 
     const subtotal = cartItems.reduce((sum, item) => {
       const itemPrice = item.variant ? item.variant.price : item.menuItem.price;
-      const addOnsTotal = (item.addOns as Array<{ price: number }>).reduce(
-        (acc, ao) => acc + ao.price,
+      const addOnsTotal = (item.addOns as Array<{ id?: string; name?: string; price: number }>).reduce(
+        (acc, ao) => {
+          // Canonical database price resolution for add-ons
+          const dbAddOn = item.menuItem.addOns.find((d) => d.id === ao.id || d.name.toLowerCase() === (ao.name || '').toLowerCase());
+          return acc + (dbAddOn ? dbAddOn.price : 0);
+        },
         0
       );
       return sum + (itemPrice + addOnsTotal) * item.quantity;
@@ -74,9 +78,10 @@ export async function addToCart(
       throw new AppError('Quantity must be an integer between 1 and 100.', 400, 'INVALID_QUANTITY');
     }
 
-    // Verify menu item exists and is available
+    // Verify menu item exists and is available, including database add-ons and variants
     const menuItem = await prisma.menuItem.findFirst({
       where: { id: menuItemId, isAvailable: true, deletedAt: null },
+      include: { variants: true, addOns: true },
     });
 
     if (!menuItem) {
@@ -98,15 +103,52 @@ export async function addToCart(
     }
 
     if (variantId) {
-      const variant = await prisma.itemVariant.findFirst({
-        where: { id: variantId, menuItemId },
-      });
+      const variant = menuItem.variants.find((v) => v.id === variantId);
       if (!variant) {
         throw new AppError('Variant not found for this item.', 404, 'VARIANT_NOT_FOUND');
       }
     }
 
-    // Upsert cart item
+    // Strictly validate add-ons against canonical database records
+    const canonicalAddOns: Array<{ id: string; name: string; price: number }> = [];
+    if (addOns && Array.isArray(addOns)) {
+      for (const reqAddOn of addOns) {
+        const dbAddOn = menuItem.addOns.find(
+          (ao) => ao.id === reqAddOn.id || ao.name.toLowerCase() === (reqAddOn.name || '').toLowerCase()
+        );
+        if (!dbAddOn) {
+          throw new AppError(`Add-on '${reqAddOn.name || reqAddOn.id}' is invalid for this menu item.`, 400, 'INVALID_ADDON');
+        }
+        canonicalAddOns.push({
+          id: dbAddOn.id,
+          name: dbAddOn.name,
+          price: dbAddOn.price,
+        });
+      }
+    }
+
+    // Prevent quantity limit escalation via repeated add-to-cart calls
+    const existingSameItem = await prisma.cartItem.findUnique({
+      where: {
+        userId_menuItemId_variantId: {
+          userId,
+          menuItemId,
+          variantId: variantId ?? '',
+        },
+      },
+    });
+
+    const currentQty = existingSameItem?.quantity ?? 0;
+    const resultingQty = currentQty + qty;
+    if (resultingQty > 100) {
+      throw new AppError(
+        `Total quantity for this item cannot exceed 100 (current in cart: ${currentQty}).`,
+        400,
+        'MAX_QUANTITY_EXCEEDED'
+      );
+    }
+
+    // Upsert cart item with canonical database values and bounded quantity
     const cartItem = await prisma.cartItem.upsert({
       where: {
         userId_menuItemId_variantId: {
@@ -116,15 +158,15 @@ export async function addToCart(
         },
       },
       update: {
-        quantity: { increment: quantity },
-        addOns: addOns ?? [],
+        quantity: resultingQty,
+        addOns: canonicalAddOns,
       },
       create: {
         userId,
         menuItemId,
         variantId,
-        quantity,
-        addOns: addOns ?? [],
+        quantity: qty,
+        addOns: canonicalAddOns,
       },
       include: {
         menuItem: { include: { variants: true, addOns: true } },

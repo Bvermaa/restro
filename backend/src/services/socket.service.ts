@@ -55,39 +55,76 @@ export function initializeSocketService(socketServer: SocketIOServer): void {
       });
     }
 
+    // Join user room (restricted strictly to authenticated user's own identity)
     socket.on('join:user', async (targetUserId: string) => {
       if (!targetUserId) return;
-      void socket.join(`user:${targetUserId}`);
-      logger.debug(`Socket ${socket.id} joined user:${targetUserId}`);
+      // Prevent user ID spoofing: user can only join their own room unless super admin
+      if (userId && targetUserId !== userId) {
+        logger.warn(`Socket ${socket.id} (user ${userId}) attempted to join unauthorized user room ${targetUserId}`);
+        return;
+      }
+      const roomUser = userId || targetUserId;
+      void socket.join(`user:${roomUser}`);
+      logger.debug(`Socket ${socket.id} joined user:${roomUser}`);
 
       // Auto-join restaurant room if this user is a restaurant owner
-      try {
-        const ownerRest = await prisma.restaurant.findFirst({
-          where: { ownerId: targetUserId, deletedAt: null },
-          select: { id: true },
-        });
-        if (ownerRest) {
-          void socket.join(`restaurant:${ownerRest.id}`);
-          logger.info(`Socket ${socket.id} auto-joined restaurant:${ownerRest.id} for owner ${targetUserId}`);
+      if (userId) {
+        try {
+          const ownerRest = await prisma.restaurant.findFirst({
+            where: { ownerId: userId, deletedAt: null },
+            select: { id: true },
+          });
+          if (ownerRest) {
+            void socket.join(`restaurant:${ownerRest.id}`);
+            logger.info(`Socket ${socket.id} auto-joined restaurant:${ownerRest.id} for owner ${userId}`);
+          }
+        } catch (err) {
+          logger.warn('Failed to auto-join restaurant room for user:', err);
         }
-      } catch (err) {
-        logger.warn('Failed to auto-join restaurant room for user:', err);
       }
     });
 
-    // Join restaurant room (for restaurant owners & customers)
-    socket.on('join:restaurant', (restaurantId: string) => {
-      void socket.join(`restaurant:${restaurantId}`);
-      logger.debug(`Socket ${socket.id} joined restaurant:${restaurantId}`);
+    // Join restaurant room (restricted strictly to verified restaurant owner, kitchen staff, or admin)
+    socket.on('join:restaurant', async (restaurantId: string) => {
+      if (!restaurantId) return;
+
+      if (!userId) {
+        logger.warn(`Unauthenticated socket ${socket.id} attempted to join restaurant room ${restaurantId}`);
+        return;
+      }
+
+      try {
+        const isOwner = await prisma.restaurant.findFirst({
+          where: { id: restaurantId, ownerId: userId, deletedAt: null },
+          select: { id: true },
+        });
+
+        const isKitchen = await prisma.user.findFirst({
+          where: { id: userId, kitchenRestaurantId: restaurantId, role: 'KITCHEN' },
+          select: { id: true },
+        });
+
+        if (!isOwner && !isKitchen) {
+          logger.warn(`User ${userId} unauthorized to join restaurant room ${restaurantId}`);
+          return;
+        }
+
+        void socket.join(`restaurant:${restaurantId}`);
+        logger.debug(`Socket ${socket.id} authorized and joined restaurant:${restaurantId}`);
+      } catch (err) {
+        logger.error('Error verifying restaurant room authorization:', err);
+      }
     });
 
     // Join order tracking room
     socket.on('join:order', (orderId: string) => {
+      if (!orderId) return;
       void socket.join(`order:${orderId}`);
       logger.debug(`Socket ${socket.id} joined order:${orderId}`);
     });
 
     socket.on('leave:order', (orderId: string) => {
+      if (!orderId) return;
       void socket.leave(`order:${orderId}`);
     });
 
@@ -104,6 +141,7 @@ export function initializeSocketService(socketServer: SocketIOServer): void {
     // Customer calls for waiter — re-emit to restaurant owner room
     socket.on('waiter:call', (data: { restaurantId: string; tableNumber: string }) => {
       const { restaurantId, tableNumber } = data;
+      if (!restaurantId || !tableNumber) return;
       logger.info(`Waiter called for restaurant ${restaurantId}, table ${tableNumber}`);
       const payload = {
         tableNumber,
@@ -114,38 +152,86 @@ export function initializeSocketService(socketServer: SocketIOServer): void {
       io.to(`restaurant:${restaurantId}`).emit('waiter_called', payload);
     });
 
-    // Owner responds to waiter call — notify customer on specific table ONLY
-    socket.on('waiter:respond', (data: { restaurantId: string; tableNumber: string }) => {
+    // Owner/staff responds to waiter call — restricted strictly to authorized restaurant staff
+    socket.on('waiter:respond', async (data: { restaurantId: string; tableNumber: string }) => {
       const { restaurantId, tableNumber } = data;
-      const cleanTable = String(tableNumber).trim();
-      logger.info(`Owner sent waiter for restaurant ${restaurantId}, table ${cleanTable}`);
-      const payload = {
-        tableNumber: cleanTable,
-        restaurantId,
-        message: `Waiter is coming in a few minutes to Table ${cleanTable}`,
-        timestamp: new Date().toISOString(),
-      };
-      io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter:responded', payload);
-      io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter_responded', payload);
-      io.to(`restaurant:${restaurantId}`).emit('waiter:responded', payload);
-      io.to(`restaurant:${restaurantId}`).emit('waiter_responded', payload);
+      if (!restaurantId || !tableNumber || !userId) {
+        logger.warn(`Unauthorized waiter:respond attempt from socket ${socket.id}`);
+        return;
+      }
+
+      try {
+        const isOwner = await prisma.restaurant.findFirst({
+          where: { id: restaurantId, ownerId: userId, deletedAt: null },
+          select: { id: true },
+        });
+
+        const isKitchen = await prisma.user.findFirst({
+          where: { id: userId, kitchenRestaurantId: restaurantId, role: 'KITCHEN' },
+          select: { id: true },
+        });
+
+        if (!isOwner && !isKitchen) {
+          logger.warn(`User ${userId} not authorized to respond to waiter call for restaurant ${restaurantId}`);
+          return;
+        }
+
+        const cleanTable = String(tableNumber).trim();
+        logger.info(`Staff responded to waiter call for restaurant ${restaurantId}, table ${cleanTable}`);
+        const payload = {
+          tableNumber: cleanTable,
+          restaurantId,
+          message: `Waiter is coming in a few minutes to Table ${cleanTable}`,
+          timestamp: new Date().toISOString(),
+        };
+        io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter:responded', payload);
+        io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter_responded', payload);
+        io.to(`restaurant:${restaurantId}`).emit('waiter:responded', payload);
+        io.to(`restaurant:${restaurantId}`).emit('waiter_responded', payload);
+      } catch (err) {
+        logger.error('Error handling waiter:respond:', err);
+      }
     });
 
-    // Owner dismisses waiter call — notify customer on specific table ONLY
-    socket.on('waiter:dismiss', (data: { restaurantId: string; tableNumber: string }) => {
+    // Owner/staff dismisses waiter call — restricted strictly to authorized restaurant staff
+    socket.on('waiter:dismiss', async (data: { restaurantId: string; tableNumber: string }) => {
       const { restaurantId, tableNumber } = data;
-      const cleanTable = String(tableNumber).trim();
-      logger.info(`Owner dismissed waiter call for restaurant ${restaurantId}, table ${cleanTable}`);
-      const payload = {
-        tableNumber: cleanTable,
-        restaurantId,
-        message: `Waiter is busy right now. You can retry after a few minutes.`,
-        timestamp: new Date().toISOString(),
-      };
-      io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter:dismissed', payload);
-      io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter_dismissed', payload);
-      io.to(`restaurant:${restaurantId}`).emit('waiter:dismissed', payload);
-      io.to(`restaurant:${restaurantId}`).emit('waiter_dismissed', payload);
+      if (!restaurantId || !tableNumber || !userId) {
+        logger.warn(`Unauthorized waiter:dismiss attempt from socket ${socket.id}`);
+        return;
+      }
+
+      try {
+        const isOwner = await prisma.restaurant.findFirst({
+          where: { id: restaurantId, ownerId: userId, deletedAt: null },
+          select: { id: true },
+        });
+
+        const isKitchen = await prisma.user.findFirst({
+          where: { id: userId, kitchenRestaurantId: restaurantId, role: 'KITCHEN' },
+          select: { id: true },
+        });
+
+        if (!isOwner && !isKitchen) {
+          logger.warn(`User ${userId} not authorized to dismiss waiter call for restaurant ${restaurantId}`);
+          return;
+        }
+
+        const cleanTable = String(tableNumber).trim();
+        logger.info(`Staff dismissed waiter call for restaurant ${restaurantId}, table ${cleanTable}`);
+        const payload = {
+          tableNumber: cleanTable,
+          restaurantId,
+          message: `Waiter is busy right now. You can retry after a few minutes.`,
+          timestamp: new Date().toISOString(),
+        };
+        io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter:dismissed', payload);
+        io.to(`table:${restaurantId}:${cleanTable}`).emit('waiter_dismissed', payload);
+        io.to(`restaurant:${restaurantId}`).emit('waiter:dismissed', payload);
+        io.to(`restaurant:${restaurantId}`).emit('waiter_dismissed', payload);
+      } catch (err) {
+        logger.error('Error handling waiter:dismiss:', err);
+      }
     });
 
     socket.on('disconnect', () => {
