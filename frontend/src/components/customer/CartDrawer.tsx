@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ShoppingBag, Minus, Plus, Trash2, Tag, ChevronRight, Sparkles } from 'lucide-react';
+import { X, ShoppingBag, Minus, Plus, Trash2, Tag, ChevronRight, Sparkles, Flame, RefreshCw } from 'lucide-react';
 import { useCartStore } from '@/store/cart.store';
 import { useAuthStore } from '@/store/auth.store';
 import { useRouter } from 'next/navigation';
@@ -23,12 +23,24 @@ interface CartDrawerProps {
 }
 
 export function CartDrawer({ open, onClose, restaurantSlug, tableNumber, tableToken, isTableVerified, themeColor }: CartDrawerProps) {
-  const { items, updateQuantity, removeItem, couponCode, couponDiscount, applyCoupon, removeCoupon, subtotal, gstAmount, total } = useCartStore();
+  const { items, updateQuantity, removeItem, couponCode, couponDiscount, applyCoupon, removeCoupon, subtotal, gstAmount, total, clearCart } = useCartStore();
   const { user } = useAuthStore();
   const router = useRouter();
 
   const [couponInput, setCouponInput] = useState('');
   const [couponLoading, setCouponLoading] = useState(false);
+  const [addonOrderId, setAddonOrderId] = useState<string | null>(null);
+  const [addonOrderNum, setAddonOrderNum] = useState<string | null>(null);
+  const [addingToOrder, setAddingToOrder] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedId = sessionStorage.getItem('qr_restaurant_addon_order_id');
+      const storedNum = sessionStorage.getItem('qr_restaurant_addon_order_num');
+      setAddonOrderId(storedId);
+      setAddonOrderNum(storedNum);
+    }
+  }, [open]);
 
   // Prevent background scrolling when cart drawer is open
   useEffect(() => {
@@ -111,6 +123,36 @@ export function CartDrawer({ open, onClose, restaurantSlug, tableNumber, tableTo
 
   const handleApplyCoupon = () => {
     handleApplyCouponDirectly(couponInput);
+  };
+
+  const handleDirectAddToOrder = async () => {
+    if (!addonOrderId || items.length === 0) return;
+    setAddingToOrder(true);
+    try {
+      const token = tableToken || (typeof window !== 'undefined' ? localStorage.getItem(`table_token_${restaurantSlug}`) || '' : '');
+      const response = await api.post(`/orders/${addonOrderId}/add-items`, {
+        cartItems: items.map((item) => ({
+          menuItemId: item.menuItemId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          addOns: item.addOns,
+        })),
+        tableToken: token,
+      });
+
+      sessionStorage.removeItem('qr_restaurant_addon_order_id');
+      sessionStorage.removeItem('qr_restaurant_addon_order_num');
+
+      clearCart();
+      onClose();
+      toast.success('🎉 Additional items fired directly to the kitchen!');
+      router.push(`/r/${restaurantSlug}/order/${addonOrderId}`);
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error ?? err.response?.data?.message ?? 'Failed to add items to order.';
+      toast.error(errMsg);
+    } finally {
+      setAddingToOrder(false);
+    }
   };
 
   const handleCheckout = () => {
@@ -373,17 +415,39 @@ export function CartDrawer({ open, onClose, restaurantSlug, tableNumber, tableTo
                   </div>
                 </div>
 
-                <button
-                  onClick={handleCheckout}
-                  className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-between px-5 shadow-lg active:scale-98 transition-all hover:opacity-95"
-                  style={{ background: `linear-gradient(135deg, ${themeColor}, #F48C06)` }}
-                >
-                  <span>Proceed to Checkout</span>
-                  <div className="flex items-center gap-2">
-                    <span>₹{grandTotal.toFixed(0)}</span>
-                    <ChevronRight className="w-5 h-5" />
-                  </div>
-                </button>
+                {addonOrderId ? (
+                  <button
+                    onClick={handleDirectAddToOrder}
+                    disabled={addingToOrder || items.length === 0}
+                    className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-between px-5 shadow-lg active:scale-98 transition-all hover:opacity-95 bg-gradient-to-r from-orange-500 to-amber-500 disabled:opacity-60"
+                  >
+                    <div className="flex items-center gap-2.5 text-left">
+                      {addingToOrder ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Flame className="w-5 h-5 shrink-0" />}
+                      <div>
+                        <span className="block leading-tight font-extrabold text-sm sm:text-base">
+                          {addingToOrder ? 'Sending to Kitchen...' : `⚡ Add to Table (#${addonOrderNum})`}
+                        </span>
+                        <span className="text-[10px] text-white/80 font-normal">No checkout needed · Billed to table</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-black text-lg">
+                      <span>₹{grandTotal.toFixed(0)}</span>
+                      <ChevronRight className="w-5 h-5" />
+                    </div>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleCheckout}
+                    className="w-full py-4 rounded-2xl text-white font-bold text-base flex items-center justify-between px-5 shadow-lg active:scale-98 transition-all hover:opacity-95"
+                    style={{ background: `linear-gradient(135deg, ${themeColor}, #F48C06)` }}
+                  >
+                    <span>Proceed to Checkout</span>
+                    <div className="flex items-center gap-2">
+                      <span>₹{grandTotal.toFixed(0)}</span>
+                      <ChevronRight className="w-5 h-5" />
+                    </div>
+                  </button>
+                )}
               </div>
             )}
           </motion.div>

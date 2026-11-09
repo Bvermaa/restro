@@ -634,6 +634,26 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
           )}
         </div>
 
+        {/* Quick Add More Items Card (Available throughout active dining) */}
+        {!['DELIVERED', 'CANCELLED'].includes(currentStatus) && (
+          <div className="bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-orange-500/10 border-2 border-orange-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-sm">
+            <div className="min-w-0">
+              <h3 className="font-bold text-sm text-foreground flex items-center gap-1.5">
+                <span>🍽️ Need more dishes, rotis or drinks?</span>
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Add extra items to your table anytime — fires directly to the kitchen without checkout!
+              </p>
+            </div>
+            <button
+              onClick={handleAddMoreItems}
+              className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs rounded-xl shadow-md transition-all active:scale-95 whitespace-nowrap flex items-center gap-1 shrink-0"
+            >
+              <span>➕ Add Items</span>
+            </button>
+          </div>
+        )}
+
         {/* Direct Payment Card */}
         {order.paymentStatus !== 'PAID' && order.paymentMethod === 'RAZORPAY' && (order.restaurant.paymentQrCode || order.restaurant.paymentUpiId || order.restaurant.paymentPhone || order.restaurant.bankAccountNumber) && (
           <div className="bg-card border border-border rounded-2xl p-5 space-y-4 shadow-sm">

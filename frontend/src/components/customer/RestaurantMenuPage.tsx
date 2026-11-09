@@ -1086,10 +1086,10 @@ export function RestaurantMenuPage({ slug, tableNumber, tableToken, isTableVerif
         </div>
       </div>
       {addonOrderId && (
-        <div className="bg-amber-500 text-white text-xs font-semibold px-4 py-3 flex items-center justify-between shadow-md">
+        <div className="bg-gradient-to-r from-orange-500 to-amber-600 text-white text-xs font-semibold px-4 py-3 flex items-center justify-between shadow-md">
           <div className="flex items-center gap-2">
-            <span>📝</span>
-            <span>You are adding items to your active Order #{addonOrderNum}. Added items will show at checkout.</span>
+            <span className="text-base">⚡</span>
+            <span>Adding extra dishes to active Order #{addonOrderNum}. Items fire directly to the kitchen without needing checkout!</span>
           </div>
           <button
             onClick={() => {
@@ -1099,7 +1099,7 @@ export function RestaurantMenuPage({ slug, tableNumber, tableToken, isTableVerif
               setAddonOrderNum(null);
               toast.info('Cancelled adding items to order.');
             }}
-            className="bg-white/20 hover:bg-white/30 text-white px-2 py-1 rounded-md transition-colors"
+            className="bg-white/20 hover:bg-white/30 text-white px-2.5 py-1 rounded-lg transition-colors font-bold text-[11px] shrink-0 ml-2"
           >
             Cancel Add-on
           </button>
@@ -1822,14 +1822,16 @@ export function RestaurantMenuPage({ slug, tableNumber, tableToken, isTableVerif
               style={{ backgroundColor: themeColor }}
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center text-sm font-bold shadow-inner">
+                <div className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center text-sm font-bold shadow-inner shrink-0">
                   {cartCount}
                 </div>
-                <span className="font-semibold text-base sm:text-lg tracking-wide">View Cart</span>
+                <span className="font-semibold text-base sm:text-lg tracking-wide truncate">
+                  {addonOrderId ? `⚡ Add to Order #${addonOrderNum}` : 'View Cart'}
+                </span>
               </div>
-              <div className="flex items-center gap-2.5">
-                <ShoppingCart className="w-5 h-5" />
+              <div className="flex items-center gap-2.5 shrink-0">
                 <span className="font-bold text-base sm:text-lg">₹{getCartTotal().toFixed(0)}</span>
+                <ShoppingCart className="w-5 h-5" />
               </div>
             </button>
           </motion.div>
