@@ -1,0 +1,65 @@
+# ── Stage 1: Install & Build ──────────────────────────────────────
+FROM node:20-alpine AS builder
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+
+# Force development mode during dependency installation so devDependencies (TypeScript, build tools) are installed
+ENV NODE_ENV=development
+
+# Copy root manifests
+COPY package.json package-lock.json ./
+
+# Copy all workspace package manifests so npm workspace graph is complete
+COPY packages/shared/package.json ./packages/shared/
+COPY backend/package.json         ./backend/
+COPY frontend/package.json        ./frontend/
+
+# Install ALL workspace dependencies from the root including devDependencies
+RUN npm ci --include=dev
+
+# Copy source files
+COPY packages/shared/ ./packages/shared/
+COPY frontend/        ./frontend/
+
+# Build shared package first
+RUN cd packages/shared && npm run build
+
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+ARG NEXT_PUBLIC_SOCKET_URL
+ENV NEXT_PUBLIC_SOCKET_URL=${NEXT_PUBLIC_SOCKET_URL}
+
+ARG NEXT_PUBLIC_RAZORPAY_KEY_ID
+ENV NEXT_PUBLIC_RAZORPAY_KEY_ID=${NEXT_PUBLIC_RAZORPAY_KEY_ID}
+
+ARG BACKEND_URL=http://backend:4000
+ENV BACKEND_URL=${BACKEND_URL}
+
+# Set NODE_ENV to production for next build (Next.js requires NODE_ENV=production to build production bundles)
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
+# Build Next.js app in standalone mode
+RUN cd frontend && npm run build
+
+# ── Stage 2: Production image ──────────────────────────────────────
+FROM node:20-alpine AS runner
+RUN apk add --no-cache libc6-compat openssl
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+ENV BACKEND_URL=http://backend:4000
+
+# Copy standalone build and static assets
+COPY --from=builder /app/frontend/.next/standalone ./
+COPY --from=builder /app/frontend/.next/static ./frontend/.next/static
+COPY --from=builder /app/frontend/public ./frontend/public
+
+WORKDIR /app/frontend
+EXPOSE 3000
+
+CMD ["node", "server.js"]

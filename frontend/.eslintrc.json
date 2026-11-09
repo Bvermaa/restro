@@ -1,0 +1,24 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "react/no-unescaped-entities": "off",
+    "@next/next/no-img-element": "warn",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "*backend*",
+              "**/backend/**",
+              "../backend/**",
+              "../../backend/**",
+              "@qr-restaurant/server"
+            ],
+            "message": "Architectural boundary violation: Frontend must NEVER import from backend. Use @/services/api or @qr-restaurant/shared."
+          }
+        ]
+      }
+    ]
+  }
+}

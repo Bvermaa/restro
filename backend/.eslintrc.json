@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "*frontend*",
+              "**/frontend/**",
+              "../frontend/**",
+              "../../frontend/**",
+              "@qr-restaurant/web"
+            ],
+            "message": "Architectural boundary violation: Backend must NEVER import from frontend. Use @qr-restaurant/shared."
+          }
+        ]
+      }
+    ]
+  }
+}

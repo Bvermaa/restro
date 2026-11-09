@@ -1,0 +1,26 @@
+# Monorepo Code Ownership
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default fallback owners for the entire repository
+* @ORG/tech-leads
+
+# Frontend workspace
+/frontend/ @ORG/frontend-team
+
+# Backend workspace & database schema
+/backend/ @ORG/backend-team
+/backend/prisma/ @ORG/backend-team @ORG/tech-leads
+
+# Shared contracts and libraries
+/packages/ @ORG/tech-leads @ORG/frontend-team @ORG/backend-team
+/packages/shared/ @ORG/tech-leads @ORG/frontend-team @ORG/backend-team
+
+# Infrastructure, CI/CD, and Governance
+/.github/ @ORG/tech-leads
+/docker/ @ORG/tech-leads
+/docker-compose.yml @ORG/tech-leads
+/render.yaml @ORG/tech-leads
+/turbo.json @ORG/tech-leads
+/package.json @ORG/tech-leads
+/docs/ @ORG/tech-leads
+/SECURITY.md @ORG/tech-leads

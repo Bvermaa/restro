@@ -1,0 +1,174 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 100% 99.2%;
+    --foreground: 217 30% 11.8%;
+    --card: 240 100% 99.2%;
+    --card-foreground: 217 30% 11.8%;
+    --popover: 240 100% 99.2%;
+    --popover-foreground: 217 30% 11.8%;
+    --primary: 164 100% 10.4%;
+    --primary-foreground: 156 44% 95%;
+    --secondary: 27 96% 61.2%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 218 53% 97.1%;
+    --muted-foreground: 152 3% 45.1%;
+    --accent: 218 64% 95.1%;
+    --accent-foreground: 217 30% 11.8%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 60 9.1% 97.8%;
+    --border: 152 3% 76.9%;
+    --input: 152 3% 76.9%;
+    --ring: 164 100% 10.4%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 217 30% 11.8%;
+    --foreground: 240 100% 99.2%;
+    --card: 217 28% 15%;
+    --card-foreground: 240 100% 99.2%;
+    --popover: 217 28% 15%;
+    --popover-foreground: 240 100% 99.2%;
+    --primary: 156 44% 71%;
+    --primary-foreground: 164 100% 10.4%;
+    --secondary: 27 96% 61.2%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 217 28% 18%;
+    --muted-foreground: 217 10% 65%;
+    --accent: 217 28% 20%;
+    --accent-foreground: 240 100% 99.2%;
+    --destructive: 0 72.2% 50.6%;
+    --destructive-foreground: 240 100% 99.2%;
+    --border: 217 20% 25%;
+    --input: 217 20% 25%;
+    --ring: 156 44% 71%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+}
+
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-white/80 dark:bg-white/5 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-xl;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-orange-500 to-amber-500 bg-clip-text text-transparent;
+  }
+
+  /* Shimmer skeleton loader */
+  .skeleton {
+    @apply bg-gradient-to-r from-muted via-muted/50 to-muted bg-[length:200%_100%] animate-shimmer rounded;
+  }
+
+  /* Premium button */
+  .btn-premium {
+    @apply relative overflow-hidden bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0;
+  }
+
+  /* Floating card animation */
+  .card-hover {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl;
+  }
+
+  /* Status badge */
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold;
+  }
+
+  /* Mobile bottom safe area */
+  .pb-safe {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  /* Scrollbar hide */
+  .scrollbar-hide,
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar,
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Custom scrollbar */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-muted rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full;
+  }
+}
+
+/* Framer Motion page transition */
+.page-transition {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom radio and checkbox */
+input[type="radio"]:checked,
+input[type="checkbox"]:checked {
+  accent-color: hsl(var(--primary));
+}
+
+/* Razorpay button override */
+.razorpay-payment-button {
+  @apply hidden;
+}
+
+/* Completely remove and hide all toaster popups across the application */
+[data-sonner-toaster],
+.data-sonner-toaster,
+[data-sonner-toast],
+[data-sonner-toast] *,
+[data-sonner-toaster] *,
+toaster,
+.toaster,
+ol[data-sonner-toaster],
+li[data-sonner-toast] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  width: 0 !important;
+  max-height: 0 !important;
+  max-width: 0 !important;
+  overflow: hidden !important;
+  transform: scale(0) !important;
+}
+
