@@ -489,6 +489,7 @@ export function CheckoutPage({ restaurantSlug, tableNumber, tableToken, isTableV
     if (items.length === 0) return;
     setLoading(true);
     try {
+      const token = tableToken || (typeof window !== 'undefined' ? localStorage.getItem(`table_token_${restaurantSlug}`) : '') || (manualTableNumber ? generateUniqueTableCode(restaurantSlug, manualTableNumber.trim()) : '');
       const response = await api.post(`/orders/${addonOrderId}/add-items`, {
         cartItems: items.map((item) => ({
           menuItemId: item.menuItemId,
@@ -497,6 +498,7 @@ export function CheckoutPage({ restaurantSlug, tableNumber, tableToken, isTableV
           addOns: item.addOns,
         })),
         paymentMethod: selectedPayment,
+        tableToken: token,
       });
 
       const { order } = response.data.data as {

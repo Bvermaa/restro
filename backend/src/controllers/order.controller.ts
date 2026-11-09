@@ -998,9 +998,11 @@ export async function addItemsToOrder(
       } else {
         // Unauthenticated guest user must provide a valid table signature matching the order
         const tableToken = (req.headers['x-table-token'] || (req.query as any)?.tableToken || (req.body as any)?.tableToken) as string;
-        const hasValidTableSession = tableToken && order.tableNumber && (
-          verifyTableSignature(order.restaurantId, order.tableNumber.trim(), tableToken) ||
-          verifyTableSignature(order.restaurant.slug, order.tableNumber.trim(), tableToken)
+        const hasValidTableSession = !order.tableNumber || (
+          tableToken && (
+            verifyTableSignature(order.restaurantId, order.tableNumber.trim(), tableToken) ||
+            verifyTableSignature(order.restaurant.slug, order.tableNumber.trim(), tableToken)
+          )
         );
         if (!hasValidTableSession) {
           throw new AppError('Valid table session token is required to add items to a guest order.', 403, 'INVALID_TABLE_SESSION');
