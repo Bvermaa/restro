@@ -4,7 +4,7 @@ import { isRestaurantOpen } from '../utils/operatingHours';
 import { AppError } from '../utils/AppError';
 // Razorpay disabled – stubs retained for legacy endpoints; both throw RAZORPAY_DISABLED errors
 import { createRazorpayOrder, verifyRazorpaySignature } from '../services/payment.razorpay.service';
-import { emitNewOrder, emitNotification, emitWaiterCall, emitOrderStatusUpdate, emitUserLoyaltyUpdate } from '../services/socket.service';
+import { emitNewOrder, emitNotification, emitWaiterCall, emitOrderStatusUpdate, emitUserLoyaltyUpdate, getSocketServer } from '../services/socket.service';
 import { sendOrderConfirmationEmail } from '../services/email.service';
 import type { AuthenticatedRequest } from '../middlewares/auth.middleware';
 import { verifyTableSignature } from '../utils/tableSignature';
@@ -1095,10 +1095,14 @@ export async function addItemsToOrder(
         data: itemsToCreate,
       });
 
+      // If the order was already marked READY, revert status to PREPARING so the kitchen actively cooks the new round of items!
+      const nextStatus = order.status === 'READY' ? 'PREPARING' : order.status;
+
       // Update Order totals & Add-on journey status
       const orderUpdate = await tx.order.update({
         where: { id: orderId },
         data: {
+          status: nextStatus,
           subtotal: { increment: addedSubtotal },
           gstAmount: { increment: addedGst },
           total: { increment: addedTotal },
@@ -1157,6 +1161,19 @@ export async function addItemsToOrder(
       paymentMethod,
       itemsSummary
     );
+
+    // Notify Kitchen Display System directly of the newly added items
+    const socketServer = getSocketServer();
+    if (socketServer) {
+      socketServer.to(`restaurant:${order.restaurantId}`).emit('kitchen:addon_added', {
+        orderId,
+        tableNumber: order.tableNumber || 'Dine-In',
+        itemsSummary,
+        addedTotal,
+        addOnStatus: updatedOrder.addOnStatus,
+        lastAddOnAt: updatedOrder.lastAddOnAt,
+      });
+    }
 
     res.json({
       success: true,

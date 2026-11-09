@@ -30,9 +30,12 @@ import { playKitchenOrderSound, processRealTimeEvent, requestDesktopNotification
 interface KitchenOrderItem {
   id: string;
   quantity: number;
-  price: number;
+  price?: number;
+  unitPrice?: number;
   notes?: string | null;
   customizations?: any;
+  addOns?: any[];
+  createdAt?: string;
   menuItem: {
     id: string;
     name: string;
@@ -44,11 +47,14 @@ interface KitchenOrder {
   id: string;
   orderNumber?: number | string;
   status: 'CONFIRMED' | 'PREPARING' | 'BAKING' | 'READY' | 'DELIVERED' | 'CANCELLED';
+  addOnStatus?: string | null;
+  lastAddOnAt?: string | null;
   orderType?: string;
   total: number;
   notes?: string | null;
   createdAt: string;
   table?: { id: string; tableNumber: number } | null;
+  tableNumber?: number | string;
   user?: { name: string; phone?: string | null } | null;
   items: KitchenOrderItem[];
 }
@@ -165,9 +171,43 @@ export default function KitchenDashboardPage() {
       queryClient.invalidateQueries({ queryKey: ['kitchen-orders'] });
     };
 
+    const handleAddonAdded = (data?: any) => {
+      const orderIdShort = data?.orderId ? String(data.orderId).slice(-6).toUpperCase() : 'ORDER';
+      const locationLabel = data?.tableNumber ? `Table ${data.tableNumber}` : 'Dine-In';
+      const itemsSummary = data?.itemsSummary || 'Additional dishes added';
+
+      if (soundEnabledRef.current) {
+        processRealTimeEvent(
+          'new_order',
+          undefined,
+          {
+            title: `🔥 ADD-ON ITEMS: ${locationLabel} (#${orderIdShort})`,
+            body: itemsSummary,
+            tag: `addon-${orderIdShort}`,
+          },
+          'kitchen'
+        );
+      } else {
+        sendDesktopNotification(`🔥 ADD-ON ITEMS: ${locationLabel} (#${orderIdShort})`, {
+          body: itemsSummary,
+          tag: `addon-${orderIdShort}`,
+        });
+      }
+
+      toast.warning(`🔥 Add-On Items: ${locationLabel} (#${orderIdShort})!`, {
+        id: `kitchen_addon_toast_${orderIdShort}`,
+        description: itemsSummary,
+        duration: 9000,
+        icon: '🔥',
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['kitchen-orders'] });
+    };
+
     socket.on('order:new', handleNewOrder);
     socket.on('new_order', handleNewOrder);
     socket.on('kitchen:new_order', handleNewOrder);
+    socket.on('kitchen:addon_added', handleAddonAdded);
     socket.on('order:status_updated', handleOrderUpdated);
     socket.on('kitchen:order_updated', handleOrderUpdated);
     socket.on('order_status_changed', handleOrderUpdated);
@@ -473,17 +513,27 @@ export default function KitchenDashboardPage() {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        {order.table?.tableNumber ? (
-                          <span className="bg-orange-500 text-white font-extrabold text-[10px] sm:text-xs px-2 py-0.5 rounded-md truncate">
-                            🍽️ Table {order.table.tableNumber}
-                          </span>
-                        ) : (
-                          <span className="bg-blue-600 text-white font-extrabold text-[10px] sm:text-xs px-2 py-0.5 rounded-md truncate">
-                            🍽️ Dine-In Order
-                          </span>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {order.table?.tableNumber ? (
+                            <span className="bg-orange-500 text-white font-extrabold text-[10px] sm:text-xs px-2 py-0.5 rounded-md truncate">
+                              🍽️ Table {order.table.tableNumber}
+                            </span>
+                          ) : (
+                            <span className="bg-blue-600 text-white font-extrabold text-[10px] sm:text-xs px-2 py-0.5 rounded-md truncate">
+                              🍽️ Dine-In Order
+                            </span>
+                          )}
+
+                          {order.lastAddOnAt && (
+                            <span className="bg-rose-600/30 text-rose-300 border border-rose-500/50 font-black text-[10px] sm:text-xs px-2 py-0.5 rounded-md flex items-center gap-1 animate-pulse shrink-0">
+                              <Flame className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span>ADD-ON ITEMS</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 shrink-0">
                           <Clock className="w-2.5 h-2.5" />
                           {new Date(order.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
                         </span>
@@ -508,28 +558,64 @@ export default function KitchenDashboardPage() {
 
                     {/* Items List */}
                     <div className="p-2.5 sm:p-4 flex-1 space-y-2 sm:space-y-3 overflow-y-auto max-h-[260px] sm:max-h-[350px]">
-                      {order.items.map((item, idx) => (
-                        <div
-                          key={item.id || idx}
-                          className="bg-slate-950/80 p-2 sm:p-3 rounded-xl border border-slate-800/80 flex items-start gap-2 min-w-0"
-                        >
-                          <span className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-orange-500/20 text-orange-400 border border-orange-500/30 flex items-center justify-center font-black text-xs sm:text-sm shrink-0">
-                            {item.quantity}x
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-extrabold text-xs sm:text-sm text-slate-100 leading-snug break-words">
-                              {item.menuItem?.name || 'Menu Item'}
-                            </h4>
-                            
-                            {/* Item Notes / Customizations */}
-                            {item.notes && (
-                              <p className="text-[10px] sm:text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 p-1.5 rounded-lg mt-1 break-words">
-                                ⚠️ Note: {item.notes}
-                              </p>
-                            )}
+                      {order.items.map((item, idx) => {
+                        const isAddonItem = Boolean(
+                          order.lastAddOnAt &&
+                          item.createdAt &&
+                          new Date(item.createdAt).getTime() - new Date(order.createdAt).getTime() > 10000
+                        );
+
+                        return (
+                          <div
+                            key={item.id || idx}
+                            className={`p-2 sm:p-3 rounded-xl border flex items-start gap-2 min-w-0 transition-all ${
+                              isAddonItem
+                                ? 'bg-amber-950/25 border-amber-500/50 shadow-sm ring-1 ring-amber-500/20'
+                                : 'bg-slate-950/80 border-slate-800/80'
+                            }`}
+                          >
+                            <span
+                              className={`w-6 h-6 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center font-black text-xs sm:text-sm shrink-0 border ${
+                                isAddonItem
+                                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                                  : 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                              }`}
+                            >
+                              {item.quantity}x
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-extrabold text-xs sm:text-sm text-slate-100 leading-snug break-words">
+                                  {item.menuItem?.name || 'Menu Item'}
+                                </h4>
+                                {isAddonItem && (
+                                  <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 inline-flex items-center gap-0.5 shadow-sm">
+                                    <Flame className="w-2.5 h-2.5" /> ADD-ON
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Item Add-ons / Modifiers */}
+                              {item.addOns && Array.isArray(item.addOns) && item.addOns.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {item.addOns.map((ao: any, aIdx: number) => (
+                                    <span key={aIdx} className="text-[9px] bg-slate-800/90 text-slate-300 px-1.5 py-0.5 rounded border border-slate-700/80">
+                                      + {ao.name || ao}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {/* Item Notes / Customizations */}
+                              {item.notes && (
+                                <p className="text-[10px] sm:text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/20 p-1.5 rounded-lg mt-1 break-words">
+                                  ⚠️ Note: {item.notes}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* Action Button Footer */}
