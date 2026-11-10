@@ -61,7 +61,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${plusJakartaSans.variable} font-sans`}>
+      <body suppressHydrationWarning className={`${inter.variable} ${plusJakartaSans.variable} font-sans`}>
         <script
           dangerouslySetInnerHTML={{
             __html: `
