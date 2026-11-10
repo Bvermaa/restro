@@ -63,7 +63,8 @@ export async function createUpiIntent(
       merchantName,
       amount: authoritativeAmount,
       txnRef,
-      orderNote: `SwiftBite Order #${order.id.slice(-6).toUpperCase()}`,
+      orderNote: `Order ${order.id.slice(-6).toUpperCase()}`,
+      isRegisteredMerchant: false, // Set to false so P2P personal VPAs are not blocked by bank switches
     });
 
     // Create or update Payment record with unique transaction reference and PENDING status

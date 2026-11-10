@@ -19,6 +19,7 @@ import {
   Sparkles,
   AlertTriangle,
   Bell,
+  Smartphone,
 } from 'lucide-react';
 import { CustomerNotificationModal } from './CustomerNotificationModal';
 import { playNewOrderSound, processRealTimeEvent } from '@/utils/audio';
@@ -655,16 +656,39 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
         )}
 
         {/* Direct Payment Card */}
-        {order.paymentStatus !== 'PAID' && order.paymentMethod === 'RAZORPAY' && (order.restaurant.paymentQrCode || order.restaurant.paymentUpiId || order.restaurant.paymentPhone || order.restaurant.bankAccountNumber) && (
+        {order.paymentStatus !== 'PAID' && ['RAZORPAY', 'UPI_INTENT'].includes(order.paymentMethod) && (order.restaurant.paymentQrCode || order.restaurant.paymentUpiId || order.restaurant.paymentPhone || order.restaurant.bankAccountNumber) && (
           <div className="bg-card border border-border rounded-2xl p-5 space-y-4 shadow-sm">
             <div className="flex items-center gap-2 border-b border-border pb-3">
               <CreditCard className="w-5 h-5 text-primary" style={{ color: themeColor }} />
-              <h3 className="font-display font-semibold text-sm">Direct Payment Details</h3>
+              <h3 className="font-display font-semibold text-sm">Direct Online Payment</h3>
             </div>
             
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Please transfer the total amount of <strong className="text-foreground">₹{order.total.toFixed(2)}</strong> directly to the restaurant owner using the details below:
+              Pay the bill amount of <strong className="text-foreground">₹{order.total.toFixed(2)}</strong> directly to the restaurant owner via any UPI App:
             </p>
+
+            {/* If UPI ID is available, provide direct 1-tap Open UPI App button */}
+            {order.restaurant.paymentUpiId && (() => {
+              const cleanVpa = encodeURIComponent(order.restaurant.paymentUpiId.trim()).replace(/%40/g, '@');
+              const cleanName = encodeURIComponent((order.restaurant.name || 'Restaurant').replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() || 'Restaurant');
+              const cleanNote = encodeURIComponent(`Order ${order.id.slice(-6).toUpperCase()}`);
+              const upiLink = `upi://pay?pa=${cleanVpa}&pn=${cleanName}&am=${order.total.toFixed(2)}&cu=INR&tn=${cleanNote}`;
+
+              return (
+                <div className="pt-1 pb-1">
+                  <a
+                    href={upiLink}
+                    className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>Pay ₹{order.total.toFixed(2)} via UPI App</span>
+                  </a>
+                  <p className="text-[10px] text-muted-foreground text-center mt-1.5">
+                    Opens Google Pay, PhonePe, Paytm, or BHIM with exact bill amount
+                  </p>
+                </div>
+              );
+            })()}
 
             {order.restaurant.paymentQrCode && (
               <div className="flex flex-col items-center justify-center p-3 bg-white rounded-2xl border border-border max-w-[200px] mx-auto">
@@ -673,7 +697,7 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
                   alt="Restaurant Payment QR"
                   className="w-40 h-40 object-contain"
                 />
-                <span className="text-[10px] text-gray-500 mt-1 font-semibold">Scan to Pay</span>
+                <span className="text-[10px] text-gray-500 mt-1 font-semibold">Scan with any UPI App</span>
               </div>
             )}
 

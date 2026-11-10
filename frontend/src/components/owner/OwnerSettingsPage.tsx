@@ -317,7 +317,9 @@ export function OwnerSettingsPage() {
   useEffect(() => {
     const upiId = form.paymentUpiId?.trim();
     if (upiId && /^[\w.-]+@[\w.-]+$/.test(upiId)) {
-      const upiString = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(form.merchantName || form.name || 'Restaurant')}&cu=INR`;
+      const cleanVpa = encodeURIComponent(upiId).replace(/%40/g, '@');
+      const cleanName = encodeURIComponent((form.merchantName || form.name || 'Restaurant').replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() || 'Restaurant');
+      const upiString = `upi://pay?pa=${cleanVpa}&pn=${cleanName}&cu=INR`;
       QRCode.toDataURL(upiString, { width: 260, margin: 1 })
         .then((url) => setDynamicQrPreviewUrl(url))
         .catch(() => setDynamicQrPreviewUrl(null));
