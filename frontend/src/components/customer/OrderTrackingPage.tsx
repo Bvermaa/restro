@@ -674,8 +674,10 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
               const cleanNote = encodeURIComponent(`Order ${order.id.slice(-6).toUpperCase()}`);
               const upiLink = `upi://pay?pa=${cleanVpa}&pn=${cleanName}&am=${order.total.toFixed(2)}&cu=INR&tn=${cleanNote}`;
 
+              const fallbackLink = `upi://pay?pa=${cleanVpa}&pn=${cleanName}&cu=INR`;
+
               return (
-                <div className="pt-1 pb-1">
+                <div className="pt-1 pb-1 space-y-2">
                   <a
                     href={upiLink}
                     className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
@@ -683,9 +685,27 @@ export function OrderTrackingPage({ orderId, restaurantSlug }: OrderTrackingPage
                     <Smartphone className="w-4 h-4" />
                     <span>Pay ₹{order.total.toFixed(2)} via UPI App</span>
                   </a>
-                  <p className="text-[10px] text-muted-foreground text-center mt-1.5">
-                    Opens Google Pay, PhonePe, Paytm, or BHIM with exact bill amount
-                  </p>
+                  
+                  {/* Anti-fraud / Fallback Option */}
+                  <div className="flex gap-2">
+                    <a
+                      href={fallbackLink}
+                      className="flex-1 py-2 px-2 rounded-xl bg-muted/60 border border-border text-[11px] font-bold text-center hover:bg-muted text-foreground transition-all flex items-center justify-center gap-1 shadow-sm"
+                    >
+                      <span>📱 Open & Enter Amount</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(order.restaurant.paymentUpiId || '');
+                        toast.success('UPI ID copied! Open GPay/PhonePe and paste.');
+                      }}
+                      className="flex-1 py-2 px-2 rounded-xl bg-primary/10 border border-primary/20 text-primary text-[11px] font-bold text-center hover:bg-primary/20 transition-all flex items-center justify-center gap-1 shadow-sm"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy UPI ID</span>
+                    </button>
+                  </div>
                 </div>
               );
             })()}

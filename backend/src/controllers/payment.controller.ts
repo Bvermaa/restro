@@ -67,6 +67,13 @@ export async function createUpiIntent(
       isRegisteredMerchant: false, // Set to false so P2P personal VPAs are not blocked by bank switches
     });
 
+    const cleanVpa = encodeURIComponent(merchantVpa.trim()).replace(/%40/g, '@');
+    const cleanName = encodeURIComponent((merchantName || 'Restaurant').replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() || 'Restaurant');
+    const fallbackUpiUrl = `upi://pay?pa=${cleanVpa}&pn=${cleanName}&cu=INR`;
+    const gpayUrl = `gpay://upi/pay?pa=${cleanVpa}&pn=${cleanName}&am=${authoritativeAmount.toFixed(2)}&cu=INR`;
+    const phonepeUrl = `phonepe://pay?pa=${cleanVpa}&pn=${cleanName}&am=${authoritativeAmount.toFixed(2)}&cu=INR`;
+    const paytmUrl = `paytmmp://pay?pa=${cleanVpa}&pn=${cleanName}&am=${authoritativeAmount.toFixed(2)}&cu=INR`;
+
     // Create or update Payment record with unique transaction reference and PENDING status
     const payment = await prisma.payment.upsert({
       where: { orderId: order.id },
@@ -110,6 +117,10 @@ export async function createUpiIntent(
         merchantVpa,
         merchantName,
         upiIntentUrl,
+        fallbackUpiUrl,
+        gpayUrl,
+        phonepeUrl,
+        paytmUrl,
       },
       message: 'UPI payment request created successfully.',
     });

@@ -147,6 +147,10 @@ export function CheckoutPage({ restaurantSlug, tableNumber, tableToken, isTableV
     merchantVpa: string;
     merchantName: string;
     upiIntentUrl: string;
+    fallbackUpiUrl?: string;
+    gpayUrl?: string;
+    phonepeUrl?: string;
+    paytmUrl?: string;
   } | null>(null);
   const [upiQrCodeDataUrl, setUpiQrCodeDataUrl] = useState<string>('');
   const [isCheckingUpiStatus, setIsCheckingUpiStatus] = useState<boolean>(false);
@@ -281,11 +285,6 @@ export function CheckoutPage({ restaurantSlug, tableNumber, tableToken, isTableV
       }
 
       setShowUpiModal(true);
-
-      // Deep link trigger for mobile devices
-      if (typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-        window.location.href = paymentInfo.upiIntentUrl;
-      }
     } catch (err: any) {
       const msg = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to initialize UPI Payment.';
       toast.error(msg);
@@ -1140,21 +1139,83 @@ export function CheckoutPage({ restaurantSlug, tableNumber, tableToken, isTableV
                   </div>
                 )}
 
-                {/* Open UPI App Button */}
+                {/* Primary Open UPI App Button */}
                 <a
                   href={upiData.upiIntentUrl}
                   className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
                 >
                   <Smartphone className="w-4 h-4" />
-                  Open UPI App to Pay ₹{upiData.amount.toFixed(0)}
+                  <span>Open UPI App to Pay ₹{upiData.amount.toFixed(0)}</span>
                 </a>
 
-                {/* Details Copy Bar */}
-                <div className="space-y-2 text-xs text-left pt-1">
-                  <div className="flex items-center justify-between p-2.5 bg-muted/40 rounded-xl">
+                {/* Specific App Direct Launch Pills */}
+                <div className="flex items-center gap-2 pt-0.5">
+                  {upiData.phonepeUrl && (
+                    <a
+                      href={upiData.phonepeUrl}
+                      className="flex-1 py-2 px-2 rounded-xl bg-purple-600/10 hover:bg-purple-600/20 text-purple-700 dark:text-purple-300 border border-purple-500/30 text-[11px] font-bold flex items-center justify-center gap-1 transition-all"
+                    >
+                      <span>🟣 PhonePe</span>
+                    </a>
+                  )}
+                  {upiData.gpayUrl && (
+                    <a
+                      href={upiData.gpayUrl}
+                      className="flex-1 py-2 px-2 rounded-xl bg-blue-600/10 hover:bg-blue-600/20 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-[11px] font-bold flex items-center justify-center gap-1 transition-all"
+                    >
+                      <span>🔵 Google Pay</span>
+                    </a>
+                  )}
+                  {upiData.paytmUrl && (
+                    <a
+                      href={upiData.paytmUrl}
+                      className="flex-1 py-2 px-2 rounded-xl bg-cyan-600/10 hover:bg-cyan-600/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 text-[11px] font-bold flex items-center justify-center gap-1 transition-all"
+                    >
+                      <span>💠 Paytm</span>
+                    </a>
+                  )}
+                </div>
+
+                {/* Anti-Fraud / "Declined by UPI Network" Guidance Card */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-left space-y-2 text-xs">
+                  <div className="flex items-start gap-1.5 font-bold text-amber-700 dark:text-amber-400">
+                    <span className="text-sm">🛡️</span>
                     <div>
+                      <p className="leading-tight">App says &ldquo;Declined to protect money&rdquo;?</p>
+                      <p className="text-[10px] text-muted-foreground font-normal mt-0.5 leading-snug">
+                        UPI security blocks web redirects for new receivers. Tap below to pay safely:
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-0.5">
+                    {upiData.fallbackUpiUrl && (
+                      <a
+                        href={upiData.fallbackUpiUrl}
+                        className="flex-1 py-2 px-2.5 rounded-xl bg-card border border-border font-bold text-[11px] text-center hover:bg-muted text-foreground transition-all flex items-center justify-center gap-1 shadow-sm"
+                      >
+                        <span>📱 Open App & Enter ₹{upiData.amount.toFixed(0)}</span>
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(upiData.merchantVpa);
+                        toast.success(`UPI ID copied: ${upiData.merchantVpa}`);
+                      }}
+                      className="flex-1 py-2 px-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary font-bold text-[11px] text-center hover:bg-primary/20 transition-all flex items-center justify-center gap-1 shadow-sm"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy UPI ID</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Details Copy Bar */}
+                <div className="space-y-2 text-xs text-left">
+                  <div className="flex items-center justify-between p-2.5 bg-muted/40 rounded-xl">
+                    <div className="min-w-0 pr-2">
                       <span className="text-muted-foreground block text-[9px] uppercase font-bold tracking-wider">Merchant VPA / UPI ID</span>
-                      <span className="font-mono font-medium text-foreground">{upiData.merchantVpa}</span>
+                      <span className="font-mono font-medium text-foreground text-[11px] truncate block">{upiData.merchantVpa}</span>
                     </div>
                     <button
                       type="button"
@@ -1162,7 +1223,7 @@ export function CheckoutPage({ restaurantSlug, tableNumber, tableToken, isTableV
                         navigator.clipboard.writeText(upiData.merchantVpa);
                         toast.success('UPI ID copied!');
                       }}
-                      className="p-2 bg-muted hover:bg-muted-foreground/10 rounded-lg text-primary transition-all flex items-center justify-center"
+                      className="p-2 bg-muted hover:bg-muted-foreground/10 rounded-lg text-primary transition-all flex items-center justify-center shrink-0"
                       title="Copy UPI ID"
                     >
                       <Copy className="w-3.5 h-3.5" />
